@@ -1,0 +1,19 @@
+{
+  "name": "megaarchitectbot",
+  "version": "1.0.0",
+  "description": "Бот-архитектор для создания ботов, команд и генерации промптов для Claude Code",
+  "main": "megaarchitectbotIndex.js",
+  "scripts": {
+    "start": "node megaarchitectbotIndex.js",
+    "dev": "NODE_ENV=development node megaarchitectbotIndex.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pkondaurov/megaarchitectbot.git"
+  },
+  "author": "pkondaurov",
+  "license": "ISC",
+  "dependencies": {
+    "libBotUtiletes": "github:pkondaurov/libBotUtilites"
+  }
+}
