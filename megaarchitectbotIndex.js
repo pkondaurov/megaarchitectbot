@@ -263,7 +263,7 @@ async function lcSaveTaskToDb(glArr, vTask) {
             if (vExistingManaged) {
                 vResultMsg += '⏭️\n';
             } else {
-                const vBotUsersId = await lib.libGetBotUsersIdByTelegramId(glArr, lib.libGetTelegramIdByUpdMsg(vTask.msg));
+                const vBotUsersId = await lib.libGetBotUsersIdByTelegramId(glArr, lib.libGetTelegramIdByUpdMsg(vTask.vInitialMsg));
                 await glArr.glKnex('megaarchitect.managed_bots')
                     .insert({
                         botusername: vBotUsername,
@@ -288,7 +288,7 @@ async function lcSaveTaskToDb(glArr, vTask) {
         } catch (err) {
             vResultMsg += `\n\n❌ **Ошибка:** ${err.message}`;
             await lib.libSendBigMessage(glArr, vChatId, vResultMsg, { parse_mode: 'Markdown' });
-            await lib.libProcessError(glArr, err, vTask.msg, false, 'lcSaveTaskToDb createBot');
+            await lib.libProcessError(glArr, err, vTask.vInitialMsg, false, 'lcSaveTaskToDb createBot');
         }//catch
     }//createBot
 }//🆘🆘🆘 Сохранение специфичных тасков для этого бота
