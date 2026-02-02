@@ -573,8 +573,22 @@ async function lcSendManagedBotsList(glArr, msg) {
 }//lcSendManagedBotsList
 
 async function lcSubstituteVars(glArr, vVariable, vBotUsersId) {
-    // Локальные переменные
-    return null;
+    let vResult = null;
+
+    // Переменная для приветствия /start — разный текст для админа и не-админа
+    if (vVariable === 'startwelcome') {
+        const vTelegramId = await lib.libGetTelegramIdByBotUsersId(glArr, vBotUsersId);
+        const vIsAdmin = glArr.glAdminList.includes(Number(vTelegramId));
+
+        if (vIsAdmin) {
+            vResult = `🛠 Добро пожаловать, Повелитель!\n\nДоступные команды:\n/newbot — создать нового бота\n/newcmd — создать команду для бота\n/listbots — список управляемых ботов\n/genprompt — сгенерировать промпт для Claude Code`;
+        }//Приветствие для админа
+        else {
+            vResult = `⚠️ Это служебный бот для администрирования экосистемы ботов.\n\nДоступ ограничен. Для получения доступа обратитесь к @pkondaurov`;
+        }//Приветствие для не-админа
+    }//startwelcome
+
+    return vResult;
 }//lcSubstituteVars
 
 async function lcGetFullInfoExtra(glArr, vBotUsersId) {
