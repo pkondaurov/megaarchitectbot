@@ -112,7 +112,7 @@ async function lcActBeforeAssign(glArr, msg, vTask) {
 async function lcSaveTaskToDb(glArr, vTask) {
     if (vTask.taskType === 'createBot') {
         const vChatId = vTask.chatId;
-        let vResultMsg = '🤖 **Создание бота**\n\n';
+        let vResultMsg = '🤖 <b>Создание бота</b>\n\n';
 
         try {
             const vTokenProd = vTask.bottoken_prod?.trim();
@@ -280,14 +280,14 @@ async function lcSaveTaskToDb(glArr, vTask) {
             }//
 
             // ============ ИТОГ ============
-            vResultMsg += '\n✅ **Бот создан!**\n';
+            vResultMsg += '\n✅ <b>Бот создан!</b>\n';
             vResultMsg += `@${vBotUsername} | lib_bots.id: ${vLibBotsId} | schema: ${vSchemaName}`;
 
-            await lib.libSendBigMessage(glArr, vChatId, vResultMsg, { parse_mode: 'Markdown' });
+            await lib.libSendBigMessage(glArr, vChatId, vResultMsg);
 
         } catch (err) {
-            vResultMsg += `\n\n❌ **Ошибка:** ${err.message}`;
-            await lib.libSendBigMessage(glArr, vChatId, vResultMsg, { parse_mode: 'Markdown' });
+            vResultMsg += `\n\n❌ <b>Ошибка:</b> ${err.message}`;
+            await lib.libSendBigMessage(glArr, vChatId, vResultMsg);
             await lib.libProcessError(glArr, err, vTask.vInitialMsg, false, 'lcSaveTaskToDb createBot');
         }//catch
     }//createBot
