@@ -286,8 +286,6 @@ async function lcSaveTaskToDb(glArr, vTask) {
             await lib.libSendBigMessage(glArr, vChatId, vResultMsg);
 
         } catch (err) {
-            vResultMsg += `\n\n❌ <b>Ошибка:</b> ${err.message}`;
-            await lib.libSendBigMessage(glArr, vChatId, vResultMsg);
             await lib.libProcessError(glArr, err, vTask.vInitialMsg, false, 'lcSaveTaskToDb createBot');
         }//catch
     }//createBot
