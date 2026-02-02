@@ -43,7 +43,6 @@ async function onStart() {
 
 async function lcRefresh() {
     await lib.libRefresh(glArr);
-    // TODO: Загрузка локальных данных
 }//lcRefresh
 
 function lcRegisterHandlers() {
@@ -64,8 +63,16 @@ function lcRegisterHandlers() {
 
 //region ===================== ОБРАБОТКА КОМАНД =====================
 
-async function lcAddProcessCommand(glArr, vCmd, vParam, msg) {
-    // TODO: Обработка локальных команд
+async function lcAddProcessCommand(cleanCommand, paramCommand, updMsg) {
+    let vTaskType;
+    let vTaskName;
+
+    if (cleanCommand === '/newbot') vTaskType = 'createBot', vTaskName = 'Создание нового бота';
+
+    if (!vTaskName) return await lib.libAddProcessCommand(glArr, cleanCommand, paramCommand, updMsg); //⛔
+
+    const vTask = await lib.libCreateTask(glArr, updMsg, vTaskType, vTaskName);
+    if (vTask) await lib.libProcessUpd(glArr, updMsg, vTask);
     return false;
 }//lcAddProcessCommand
 
@@ -74,7 +81,7 @@ async function lcAddProcessCommand(glArr, vCmd, vParam, msg) {
 //region ===================== ПОДГОТОВКА ШАГОВ =====================
 
 async function lcPrepareQuestionStep(glArr, vTask) {
-    // TODO: Динамические кнопки
+    // Динамических кнопок пока нет
 }//lcPrepareQuestionStep
 
 //endregion
@@ -82,7 +89,20 @@ async function lcPrepareQuestionStep(glArr, vTask) {
 //region ===================== ДЕЙСТВИЯ ПЕРЕД ПРИСВОЕНИЕМ =====================
 
 async function lcActBeforeAssign(glArr, msg, vTask) {
-    // TODO: Логика перед присвоением
+    if (vTask.taskType === 'createBot' && vTask.currentScenarioStep?.stepname === 'bottoken_test') {
+        if (vTask.use_shared_test === 'yes') {
+            // Получаем токен общего тестового бота из любого существующего бота
+            const dbBot = await glArr.glKnex(`${glArr.glPgLibSchema}.lib_bots`)
+                .select(glArr.glKnex.raw("secrets->'telegram'->>'test' as testtoken"))
+                .whereRaw("secrets->'telegram'->>'test' IS NOT NULL")
+                .first();
+
+            if (dbBot?.testtoken) {
+                vTask.bottoken_test = dbBot.testtoken;
+                await lib.libActualiseCurrentStep(glArr, vTask);
+            }//
+        }//Подстановка токена общего тестового бота
+    }//createBot bottoken_test
 }//lcActBeforeAssign
 
 //endregion
@@ -90,7 +110,187 @@ async function lcActBeforeAssign(glArr, msg, vTask) {
 //region ===================== СОХРАНЕНИЕ В БД =====================
 
 async function lcSaveTaskToDb(glArr, vTask) {
-    // TODO: Сохранение результатов задачи
+    if (vTask.taskType === 'createBot') {
+        const vChatId = vTask.chatId;
+        let vResultMsg = '🤖 **Создание бота**\n\n';
+
+        try {
+            const vTokenProd = vTask.bottoken_prod?.trim();
+            const vTokenTest = vTask.bottoken_test?.trim();
+            const vDescription = vTask.botdescription || '';
+            const vCreateGithub = vTask.create_github === 'yes';
+            const vStartMessage = vTask.start_message || 'Добро пожаловать!';
+
+            // ============ A. ВАЛИДАЦИЯ ТОКЕНА И ПОЛУЧЕНИЕ BOT INFO ============
+            vResultMsg += '📡 Проверка токена... ';
+            const TelegramBot = require('node-telegram-bot-api');
+            const tempBot = new TelegramBot(vTokenProd);
+            let vBotInfo;
+            try {
+                vBotInfo = await tempBot.getMe();
+            } catch (err) {
+                vResultMsg += '❌\n\n⚠️ Неверный токен прод-бота!';
+                await lib.libSendBigMessage(glArr, vChatId, vResultMsg);
+                return; //⛔
+            }//
+            const vBotTelegramId = vBotInfo.id;
+            const vBotUsername = vBotInfo.username.toLowerCase();
+            vResultMsg += `✅ @${vBotUsername} (ID: ${vBotTelegramId})\n`;
+
+            // ============ B. LIB_BOTS — ПРОВЕРКА/СОЗДАНИЕ ============
+            vResultMsg += '💾 lib_bots... ';
+            let vLibBotsId;
+            const vExistingBot = await glArr.glKnex(`${glArr.glPgLibSchema}.lib_bots`)
+                .where('botusername', vBotUsername)
+                .first();
+
+            if (vExistingBot) {
+                vLibBotsId = vExistingBot.id;
+                vResultMsg += `⏭️ уже есть (id: ${vLibBotsId})\n`;
+            } else {
+                const vMaxPort = await glArr.glKnex(`${glArr.glPgLibSchema}.lib_bots`)
+                    .max('port as maxport')
+                    .first();
+                const vNewPort = (vMaxPort?.maxport || 3000) + 1;
+
+                const vSecrets = {
+                    telegram: { prod: vTokenProd, test: vTokenTest || null },
+                    lib: {},
+                    lc: {}
+                };
+
+                const [vNewBot] = await glArr.glKnex(`${glArr.glPgLibSchema}.lib_bots`)
+                    .insert({
+                        botusername: vBotUsername,
+                        bottelegramid: vBotTelegramId,
+                        port: vNewPort,
+                        secrets: JSON.stringify(vSecrets)
+                    })
+                    .returning('id');
+                vLibBotsId = vNewBot.id || vNewBot;
+                vResultMsg += `✅ создан (id: ${vLibBotsId}, port: ${vNewPort})\n`;
+            }//
+
+            // ============ C. СХЕМА БД — ПРОВЕРКА/СОЗДАНИЕ ============
+            vResultMsg += '🗄️ Схема БД... ';
+            const vSchemaName = vBotUsername;
+            const vSchemaExists = await glArr.glKnex.raw(
+                `SELECT 1 FROM information_schema.schemata WHERE schema_name = ?`, [vSchemaName]
+            );
+
+            if (vSchemaExists.rows.length > 0) {
+                vResultMsg += `⏭️ ${vSchemaName} уже есть\n`;
+            } else {
+                await glArr.glKnex.raw(`CREATE SCHEMA "${vSchemaName}"`);
+                vResultMsg += `✅ ${vSchemaName} создана\n`;
+            }//
+
+            // ============ D. РАБОЧИЕ ГРУППЫ — ПРОВЕРКА/СОЗДАНИЕ ============
+            vResultMsg += '👥 Рабочие группы...\n';
+            const vGroupTypes = [
+                { codename: 'glLogChatId', name: `Лог ${vBotUsername}` },
+                { codename: 'glErrorChatId', name: `Ошибки ${vBotUsername}` },
+                { codename: 'glSalesChatId', name: `Заявки ${vBotUsername}` },
+                { codename: 'glTestLogChatId', name: `Тестлог ${vBotUsername}` },
+                { codename: 'glStoreFilesChatId', name: `Файлы ${vBotUsername}` },
+                { codename: 'glStoreTalksChatId', name: `Переписки ${vBotUsername}` },
+            ];
+
+            for (const vGroup of vGroupTypes) {
+                const vExistingGroup = await glArr.glKnex(`${glArr.glPgLibSchema}.lib_workgroups`)
+                    .where('botusername', vBotUsername)
+                    .where('codename', vGroup.codename)
+                    .first();
+
+                if (vExistingGroup?.telegramid) {
+                    vResultMsg += `   ${vGroup.codename}: ⏭️\n`;
+                    continue; //🛑
+                }//
+
+                try {
+                    const vGroupResult = await lib.libCreateChatForBot(glArr, vGroup.name, 'Рабочая группа');
+
+                    // Добавляем нового бота в группу
+                    await lib.libAddMembersToChat(glArr, vGroupResult.vChatId, [
+                        { id: vBotTelegramId, rank: 'Main Bot' },
+                    ]);
+
+                    if (vExistingGroup) {
+                        await glArr.glKnex(`${glArr.glPgLibSchema}.lib_workgroups`)
+                            .where('id', vExistingGroup.id)
+                            .update({ telegramid: vGroupResult.vChatId });
+                    } else {
+                        await glArr.glKnex(`${glArr.glPgLibSchema}.lib_workgroups`)
+                            .insert({
+                                telegramid: vGroupResult.vChatId,
+                                codename: vGroup.codename,
+                                groupname: vGroup.name,
+                                botusername: vBotUsername
+                            });
+                    }//
+
+                    vResultMsg += `   ${vGroup.codename}: ✅\n`;
+                } catch (err) {
+                    vResultMsg += `   ${vGroup.codename}: ❌ ${err.message}\n`;
+                }//
+            }//for groups
+
+            // ============ E. LIB_CMDMESSAGES — /START ============
+            vResultMsg += '💬 /start... ';
+            const vExistingStart = await glArr.glKnex(`${glArr.glPgLibSchema}.lib_cmdmessages`)
+                .where('botusername', vBotUsername)
+                .where('command', '/start')
+                .first();
+
+            if (vExistingStart) {
+                vResultMsg += '⏭️\n';
+            } else {
+                await glArr.glKnex(`${glArr.glPgLibSchema}.lib_cmdmessages`)
+                    .insert({
+                        botusername: vBotUsername,
+                        command: '/start',
+                        messagetext: vStartMessage
+                    });
+                vResultMsg += '✅\n';
+            }//
+
+            // ============ F. MANAGED_BOTS ============
+            vResultMsg += '📋 managed_bots... ';
+            const vExistingManaged = await glArr.glKnex('megaarchitect.managed_bots')
+                .where('botusername', vBotUsername)
+                .first();
+
+            if (vExistingManaged) {
+                vResultMsg += '⏭️\n';
+            } else {
+                const vBotUsersId = await lib.libGetBotUsersIdByTelegramId(glArr, lib.libGetTelegramIdByUpdMsg(vTask.msg));
+                await glArr.glKnex('megaarchitect.managed_bots')
+                    .insert({
+                        botusername: vBotUsername,
+                        lib_bots_id: vLibBotsId,
+                        github_repo: vCreateGithub ? `pkondaurov/${vBotUsername}` : null,
+                        createdby: vBotUsersId
+                    });
+                vResultMsg += '✅\n';
+            }//
+
+            // ============ G. GITHUB ============
+            if (vCreateGithub) {
+                vResultMsg += '📦 GitHub... ⏳ TODO\n';
+            }//
+
+            // ============ ИТОГ ============
+            vResultMsg += '\n✅ **Бот создан!**\n';
+            vResultMsg += `@${vBotUsername} | lib_bots.id: ${vLibBotsId} | schema: ${vSchemaName}`;
+
+            await lib.libSendBigMessage(glArr, vChatId, vResultMsg, { parse_mode: 'Markdown' });
+
+        } catch (err) {
+            vResultMsg += `\n\n❌ **Ошибка:** ${err.message}`;
+            await lib.libSendBigMessage(glArr, vChatId, vResultMsg, { parse_mode: 'Markdown' });
+            await lib.libProcessError(glArr, err, vTask.msg, false, 'lcSaveTaskToDb createBot');
+        }//catch
+    }//createBot
 }//lcSaveTaskToDb
 
 //endregion
@@ -100,17 +300,15 @@ async function lcSaveTaskToDb(glArr, vTask) {
 async function lcSubstituteVars(glArr, vVariable, vBotUsersId) {
     let vResult = null;
 
-    // Переменная для приветствия /start — разный текст для админа и не-админа
     if (vVariable === 'startwelcome') {
         const vTelegramId = await lib.libGetTelegramIdByBotUsersId(glArr, vBotUsersId);
         const vIsAdmin = glArr.glAdminList.includes(Number(vTelegramId));
 
         if (vIsAdmin) {
-            vResult = `🛠 Добро пожаловать, Повелитель!\n\nДоступные команды:\n/newbot — создать нового бота\n/newcmd — создать команду для бота\n/listbots — список управляемых ботов\n/genprompt — сгенерировать промпт для Claude Code`;
-        }//Приветствие для админа
-        else {
-            vResult = `⚠️ Это служебный бот для администрирования экосистемы ботов.\n\nДоступ ограничен. Для получения доступа обратитесь к @pkondaurov`;
-        }//Приветствие для не-админа
+            vResult = `🛠 Добро пожаловать, Повелитель!\n\nДоступные команды:\n/newbot — создать нового бота`;
+        } else {
+            vResult = `⚠️ Это служебный бот для администрирования.\n\nДоступ ограничен. Обратитесь к @pkondaurov`;
+        }//
     }//startwelcome
 
     return vResult;
@@ -121,7 +319,6 @@ async function lcSubstituteVars(glArr, vVariable, vBotUsersId) {
 //region ===================== ИНФОРМАЦИЯ О ПОЛЬЗОВАТЕЛЕ =====================
 
 async function lcGetFullInfoExtra(glArr, vBotUsersId) {
-    // TODO: Локальная информация для libGetFullInfo
     return null;
 }//lcGetFullInfoExtra
 
