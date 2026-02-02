@@ -61,8 +61,7 @@ function lcRegisterHandlers() {
 
 //endregion
 
-//region ===================== ОБРАБОТКА КОМАНД =====================
-
+//⛅️⛅️⛅️ Локальная реализация библиотечных функций🔽🔽🔽
 async function lcAddProcessCommand(cleanCommand, paramCommand, updMsg) {
     let vTaskType;
     let vTaskName;
@@ -74,20 +73,26 @@ async function lcAddProcessCommand(cleanCommand, paramCommand, updMsg) {
     const vTask = await lib.libCreateTask(glArr, updMsg, vTaskType, vTaskName);
     if (vTask) await lib.libProcessUpd(glArr, updMsg, vTask);
     return false;
-}//lcAddProcessCommand
+} ////➕➕➕Обработка команд для этого бота
+async function lcSubstituteVars(glArr, vVariable, vBotUsersId) {// 📢📢📢Переменные
+    let vResult = null;
 
-//endregion
+    if (vVariable === 'startwelcome') {
+        const vTelegramId = await lib.libGetTelegramIdByBotUsersId(glArr, vBotUsersId);
+        const vIsAdmin = glArr.glAdminList.includes(Number(vTelegramId));
 
-//region ===================== ПОДГОТОВКА ШАГОВ =====================
+        if (vIsAdmin) {
+            vResult = `🛠 Добро пожаловать, Повелитель!\n\nДоступные команды:\n/newbot — создать нового бота`;
+        } else {
+            vResult = `⚠️ Это служебный бот для администрирования.\n\nДоступ ограничен. Обратитесь к @pkondaurov`;
+        }//
+    }//startwelcome
 
+    return vResult;
+}// 📢📢📢Переменные
 async function lcPrepareQuestionStep(glArr, vTask) {
     // Динамических кнопок пока нет
-}//lcPrepareQuestionStep
-
-//endregion
-
-//region ===================== ДЕЙСТВИЯ ПЕРЕД ПРИСВОЕНИЕМ =====================
-
+} //❓🆗❓ Добавление динамических кнопок и обработка вопроса шага перед отправкой пользователю
 async function lcActBeforeAssign(glArr, msg, vTask) {
     if (vTask.taskType === 'createBot' && vTask.currentScenarioStep?.stepname === 'bottoken_test') {
         if (vTask.use_shared_test === 'yes') {
@@ -103,12 +108,7 @@ async function lcActBeforeAssign(glArr, msg, vTask) {
             }//
         }//Подстановка токена общего тестового бота
     }//createBot bottoken_test
-}//lcActBeforeAssign
-
-//endregion
-
-//region ===================== СОХРАНЕНИЕ В БД =====================
-
+} //☀️☀️☀️🛃🛃🛃 Дозаполнение полей перед присвоением значения шагу
 async function lcSaveTaskToDb(glArr, vTask) {
     if (vTask.taskType === 'createBot') {
         const vChatId = vTask.chatId;
@@ -291,37 +291,9 @@ async function lcSaveTaskToDb(glArr, vTask) {
             await lib.libProcessError(glArr, err, vTask.msg, false, 'lcSaveTaskToDb createBot');
         }//catch
     }//createBot
-}//lcSaveTaskToDb
-
-//endregion
-
-//region ===================== ПОДСТАНОВКА ПЕРЕМЕННЫХ =====================
-
-async function lcSubstituteVars(glArr, vVariable, vBotUsersId) {
-    let vResult = null;
-
-    if (vVariable === 'startwelcome') {
-        const vTelegramId = await lib.libGetTelegramIdByBotUsersId(glArr, vBotUsersId);
-        const vIsAdmin = glArr.glAdminList.includes(Number(vTelegramId));
-
-        if (vIsAdmin) {
-            vResult = `🛠 Добро пожаловать, Повелитель!\n\nДоступные команды:\n/newbot — создать нового бота`;
-        } else {
-            vResult = `⚠️ Это служебный бот для администрирования.\n\nДоступ ограничен. Обратитесь к @pkondaurov`;
-        }//
-    }//startwelcome
-
-    return vResult;
-}//lcSubstituteVars
-
-//endregion
-
-//region ===================== ИНФОРМАЦИЯ О ПОЛЬЗОВАТЕЛЕ =====================
-
+}//🆘🆘🆘 Сохранение специфичных тасков для этого бота
 async function lcGetFullInfoExtra(glArr, vBotUsersId) {
     return null;
-}//lcGetFullInfoExtra
-
-//endregion
+}//ℹ️ Локальная информация для libGetFullInfo
 
 onStart();
