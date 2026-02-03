@@ -74,7 +74,7 @@ async function lcAddProcessCommand(cleanCommand, paramCommand, updMsg) {
     if (vTask) await lib.libProcessUpd(glArr, updMsg, vTask);
     return false;
 } ////➕➕➕Обработка команд для этого бота
-async function lcSubstituteVars(glArr, vVariable, vBotUsersId) {// 📢📢📢Переменные
+async function lcSubstituteVars(vVariable, vBotUsersId) {// 📢📢📢Переменные
     let vResult = null;
 
     if (vVariable === 'startwelcome') {
@@ -90,10 +90,10 @@ async function lcSubstituteVars(glArr, vVariable, vBotUsersId) {// 📢📢📢�
 
     return vResult;
 }// 📢📢📢Переменные
-async function lcPrepareQuestionStep(glArr, vTask) {
+async function lcPrepareQuestionStep(vTask, vMsgValue) {
     // Динамических кнопок пока нет
 } //❓🆗❓ Добавление динамических кнопок и обработка вопроса шага перед отправкой пользователю
-async function lcActBeforeAssign(glArr, msg, vTask) {
+async function lcActBeforeAssign(updMsg, vTask) {
     if (vTask.taskType === 'createBot' && vTask.currentScenarioStep?.stepname === 'bottoken_test') {
         if (vTask.use_shared_test === 'yes') {
             // Получаем токен общего тестового бота из любого существующего бота
@@ -109,15 +109,13 @@ async function lcActBeforeAssign(glArr, msg, vTask) {
         }//Подстановка токена общего тестового бота
     }//createBot bottoken_test
 } //☀️☀️☀️🛃🛃🛃 Дозаполнение полей перед присвоением значения шагу
-async function lcSaveTaskToDb(glArr, vTask) {
+async function lcSaveTaskToDb(vTask) {
     if (vTask.taskType === 'createBot') {
-        const vChatId = vTask.chatId;
         let vResultMsg = '🤖 <b>Создание бота</b>\n\n';
 
         try {
             const vTokenProd = vTask.bottoken_prod?.trim();
             const vTokenTest = vTask.bottoken_test?.trim();
-            const vDescription = vTask.botdescription || '';
             const vCreateGithub = vTask.create_github === 'yes';
             const vStartMessage = vTask.start_message || 'Добро пожаловать!';
 
@@ -130,7 +128,7 @@ async function lcSaveTaskToDb(glArr, vTask) {
                 vBotInfo = await tempBot.getMe();
             } catch (err) {
                 vResultMsg += '❌\n\n⚠️ Неверный токен прод-бота!';
-                await lib.libSendBigMessage(glArr, vChatId, vResultMsg);
+                await lib.libSendBigMessage(glArr, vTask.vChatId, vResultMsg);
                 return; //⛔
             }//
             const vBotTelegramId = vBotInfo.id;
@@ -239,7 +237,7 @@ async function lcSaveTaskToDb(glArr, vTask) {
             vResultMsg += '💬 /start... ';
             const vExistingStart = await glArr.glKnex(`${glArr.glPgLibSchema}.lib_cmdmessages`)
                 .where('botusername', vBotUsername)
-                .where('command', '/start')
+                .where('initcommand', '/start')
                 .first();
 
             if (vExistingStart) {
@@ -248,8 +246,8 @@ async function lcSaveTaskToDb(glArr, vTask) {
                 await glArr.glKnex(`${glArr.glPgLibSchema}.lib_cmdmessages`)
                     .insert({
                         botusername: vBotUsername,
-                        command: '/start',
-                        messagetext: vStartMessage
+                        initcommand: '/start',
+                        textmessage: vStartMessage
                     });
                 vResultMsg += '✅\n';
             }//
@@ -263,13 +261,12 @@ async function lcSaveTaskToDb(glArr, vTask) {
             if (vExistingManaged) {
                 vResultMsg += '⏭️\n';
             } else {
-                const vBotUsersId = await lib.libGetBotUsersIdByTelegramId(glArr, lib.libGetTelegramIdByUpdMsg(vTask.vInitialMsg));
                 await glArr.glKnex('megaarchitect.managed_bots')
                     .insert({
                         botusername: vBotUsername,
                         lib_bots_id: vLibBotsId,
                         github_repo: vCreateGithub ? `pkondaurov/${vBotUsername}` : null,
-                        createdby: vBotUsersId
+                        createdby: vTask.vTaskBotUsersId
                     });
                 vResultMsg += '✅\n';
             }//
@@ -283,14 +280,14 @@ async function lcSaveTaskToDb(glArr, vTask) {
             vResultMsg += '\n✅ <b>Бот создан!</b>\n';
             vResultMsg += `@${vBotUsername} | lib_bots.id: ${vLibBotsId} | schema: ${vSchemaName}`;
 
-            await lib.libSendBigMessage(glArr, vChatId, vResultMsg);
+            await lib.libSendBigMessage(glArr, vTask.vChatId, vResultMsg);
 
         } catch (err) {
             await lib.libProcessError(glArr, err, vTask.vInitialMsg, false, 'lcSaveTaskToDb createBot');
         }//catch
     }//createBot
 }//🆘🆘🆘 Сохранение специфичных тасков для этого бота
-async function lcGetFullInfoExtra(glArr, vBotUsersId) {
+async function lcGetFullInfoExtra(vBotUsersId) {
     return null;
 }//ℹ️ Локальная информация для libGetFullInfo
 
