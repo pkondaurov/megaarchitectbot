@@ -5,6 +5,8 @@ const lib = process.env.NODE_ENV === 'production'
     ? require('libBotUtiletes')
     : require('../libBotUtilites/libBotUtilitesIndex.js');
 
+const fs = require('fs');
+const { execSync } = require('child_process');
 const dbConnect = require('./dbconnect.json');
 
 //region ===================== ИНИЦИАЛИЗАЦИЯ =====================
@@ -271,10 +273,77 @@ async function lcSaveTaskToDb(vTask) {
                 vResultMsg += '✅\n';
             }//
 
-            // ============ G. GITHUB ============
+            // ============ G. GITHUB + ДЕПЛОЙ ============
             if (vCreateGithub) {
-                vResultMsg += '📦 GitHub... ⏳ TODO\n';
-            }//
+                const vRepoName = vBotUsername;
+                const vOwner = 'pkondaurov';
+                const vRepoUrl = `git@github.com:${vOwner}/${vRepoName}.git`;
+                const vProdPath = `/home/notfstrf/bots/${vBotUsername}`;
+                const vTestPath = `/home/pkondaurov/dev/${vBotUsername}`;
+                const vLocalPath = glArr.glIsProd ? vProdPath : vTestPath;
+
+                // Проверяем/создаём репозиторий
+                vResultMsg += '📦 GitHub... ';
+                try {
+                    let vRepoExists = false;
+                    try {
+                        execSync(`gh repo view ${vOwner}/${vRepoName}`, { encoding: 'utf8', stdio: 'pipe' });
+                        vRepoExists = true;
+                    } catch (e) { /* не существует */ }
+
+                    if (vRepoExists) {
+                        vResultMsg += '⏭️ уже есть\n';
+                    } else {
+                        const vDesc = vTask.botdescription || `Telegram bot ${vBotUsername}`;
+                        execSync(`gh repo create ${vRepoName} --public --description "${vDesc}"`, { encoding: 'utf8' });
+                        vResultMsg += '✅\n';
+                    }//
+                } catch (err) {
+                    vResultMsg += `❌ ${err.message}\n`;
+                }//
+
+                // Клонируем локально
+                vResultMsg += glArr.glIsProd ? '🚀 Клон на прод... ' : '🖥️ Клон на тест... ';
+                try {
+                    if (!fs.existsSync(vLocalPath)) {
+                        execSync(`git clone ${vRepoUrl} ${vLocalPath}`, { encoding: 'utf8' });
+
+                        // Читаем шаблон из БД и заменяем переменные
+                        const dbCfg = await glArr.glKnex(`${glArr.glPgLibSchema}.lib_configs`).first();
+                        const vIndexContent = dbCfg.indexjs
+                            .replace(/🔬botusername🔬/g, vBotUsername)
+                            .replace(/🔬schema🔬/g, vSchemaName)
+                            .replace(/🔬description🔬/g, vTask.botdescription || `Telegram bot ${vBotUsername}`);
+
+                        // Записываем Index.js
+                        const vIndexPath = `${vLocalPath}/${vBotUsername}Index.js`;
+                        fs.writeFileSync(vIndexPath, vIndexContent, 'utf8');
+
+                        // Коммитим и пушим
+                        execSync(`cd ${vLocalPath} && git add . && git commit -m "Initial commit: bot skeleton" && git push`, { encoding: 'utf8' });
+
+                        vResultMsg += '✅\n';
+                    } else {
+                        vResultMsg += '⏭️\n';
+                    }//
+                } catch (err) {
+                    vResultMsg += `❌ ${err.message}\n`;
+                }//
+
+                // Клонируем на удалённый сервер
+                if (glArr.glIsProd) {
+                    // TODO: SSH на тест (пока недоступен с прода)
+                    vResultMsg += '🖥️ Клон на тест... ⏸️ (SSH не настроен)\n';
+                } else {
+                    vResultMsg += '🚀 Клон на прод... ';
+                    try {
+                        const vResult = execSync(`ssh notfstrf@84.252.140.239 "[ -d '${vProdPath}' ] && echo EXISTS || git clone ${vRepoUrl} ${vProdPath} && echo CLONED"`, { encoding: 'utf8' });
+                        vResultMsg += vResult.includes('CLONED') ? '✅\n' : '⏭️\n';
+                    } catch (err) {
+                        vResultMsg += `❌ ${err.message}\n`;
+                    }//
+                }//
+            }//GitHub + деплой
 
             // ============ ИТОГ ============
             vResultMsg += '\n✅ <b>Бот создан!</b>\n';
