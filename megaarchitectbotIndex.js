@@ -210,9 +210,9 @@ async function lcSaveTaskToDb(vTask) {
                 try {
                     const vGroupResult = await lib.libCreateChatForBot(glArr, vGroup.name, 'Рабочая группа');
 
-                    // Добавляем нового бота в группу
+                    // Добавляем нового бота в группу (по username, не по ID)
                     await lib.libAddMembersToChat(glArr, vGroupResult.vChatId, [
-                        { id: vBotTelegramId, rank: 'Main Bot' },
+                        { id: `@${vBotUsername}`, rank: 'Main Bot' },
                     ]);
 
                     if (vExistingGroup) {
