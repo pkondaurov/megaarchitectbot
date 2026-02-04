@@ -319,8 +319,8 @@ async function lcSaveTaskToDb(vTask) {
                         const vIndexPath = `${vLocalPath}/${vBotUsername}Index.js`;
                         fs.writeFileSync(vIndexPath, vIndexContent, 'utf8');
 
-                        // Коммитим и пушим
-                        execSync(`cd ${vLocalPath} && git add . && git commit -m "Initial commit: bot skeleton" && git push`, { encoding: 'utf8' });
+                        // Коммитим и пушим (в пустой репо нужен -u origin main)
+                        execSync(`cd ${vLocalPath} && git checkout -b main && git add . && git commit -m "Initial commit: bot skeleton" && git push -u origin main`, { encoding: 'utf8' });
 
                         vResultMsg += '✅\n';
                     } else {
