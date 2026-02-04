@@ -13,7 +13,7 @@ const dbConnect = require('./dbconnect.json');
 
 const vBotConfig = {
     glBotUserName: 'megaarchitectbot',
-    schema: 'megaarchitect',
+    schema: 'megaarchitectbot',
     dbConnect: dbConnect,
     onStart: onStart,
     cbLcAddProcessCommand: lcAddProcessCommand,
@@ -256,14 +256,14 @@ async function lcSaveTaskToDb(vTask) {
 
             // ============ F. MANAGED_BOTS ============
             vResultMsg += '📋 managed_bots... ';
-            const vExistingManaged = await glArr.glKnex('megaarchitect.managed_bots')
+            const vExistingManaged = await glArr.glKnex('megaarchitectbot.managed_bots')
                 .where('botusername', vBotUsername)
                 .first();
 
             if (vExistingManaged) {
                 vResultMsg += '⏭️\n';
             } else {
-                await glArr.glKnex('megaarchitect.managed_bots')
+                await glArr.glKnex('megaarchitectbot.managed_bots')
                     .insert({
                         botusername: vBotUsername,
                         lib_bots_id: vLibBotsId,

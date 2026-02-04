@@ -15,10 +15,11 @@
 - **GitHub:** https://github.com/pkondaurov/megaarchitectbot
 - **Библиотека:** @../libBotUtilites/CLAUDE.md
 - **Схема библиотеки:** `fbs_technozerg_bot`
-- **Схема бота:** `megaarchitect` (без префикса в запросах)
+- **Схема бота:** `megaarchitectbot`
 
 ### Именование
 - **Имя бота:** `megaarchitectbot` — критично для `botusername`
+- **ВАЖНО: schema = botusername** — схема БД всегда совпадает с именем бота
 - **Тестовый бот:** `@forlocaltestbot` (общий для всех проектов)
 
 ### Префиксы функций
