@@ -49,6 +49,7 @@ async function lcRefresh() {
 
 function lcRegisterHandlers() {
     glArr.glBot.on('message', async (msg) => {
+        console.log('📨 MESSAGE:', msg.text || '[no text]', 'from:', msg.from?.id);
         await lib.libEnqueueMessage(glArr, msg);
     });
 
@@ -65,17 +66,8 @@ function lcRegisterHandlers() {
 
 //⛅️⛅️⛅️ Локальная реализация библиотечных функций🔽🔽🔽
 async function lcAddProcessCommand(cleanCommand, paramCommand, updMsg) {
-    let vTaskType;
-    let vTaskName;
-
-    if (cleanCommand === '/newbot') vTaskType = 'createBot', vTaskName = 'Создание нового бота';
-
-    if (!vTaskName) return await lib.libAddProcessCommand(glArr, cleanCommand, paramCommand, updMsg); //⛔
-
-    const vTask = await lib.libCreateTask(glArr, updMsg, vTaskType, vTaskName);
-    if (vTask) await lib.libProcessUpd(glArr, updMsg, vTask);
-    return false;
-} ////➕➕➕Обработка команд для этого бота
+    return await lib.libAddProcessCommand(glArr, cleanCommand, paramCommand, updMsg);
+} //➕➕➕Обработка команд для этого бота
 async function lcSubstituteVars(vVariable, vBotUsersId) {// 📢📢📢Переменные
     let vResult = null;
 
@@ -84,7 +76,7 @@ async function lcSubstituteVars(vVariable, vBotUsersId) {// 📢📢📢Пере
         const vIsAdmin = glArr.glAdminList.includes(Number(vTelegramId));
 
         if (vIsAdmin) {
-            vResult = `🛠 Добро пожаловать, Повелитель!\n\nДоступные команды:\n/newbot — создать нового бота`;
+            vResult = `🛠 Добро пожаловать, Повелитель!\n\nДоступные команды:\n/newbot — создать нового бота\n/deletebot — удалить бота`;
         } else {
             vResult = `⚠️ Это служебный бот для администрирования.\n\nДоступ ограничен. Обратитесь к @pkondaurov`;
         }//
@@ -93,11 +85,75 @@ async function lcSubstituteVars(vVariable, vBotUsersId) {// 📢📢📢Пере
     return vResult;
 }// 📢📢📢Переменные
 async function lcPrepareQuestionStep(vTask, vMsgValue) {
-    // Динамических кнопок пока нет
+    console.log('❓ lcPrepareQuestionStep:', vTask.taskType, vTask.currentScenarioStep?.stepname);
+    if (vTask.taskType === 'deleteBot') {
+        if (vTask.currentScenarioStep?.stepname === 'choose_bot') {
+            // Динамические кнопки - список ботов из lib_bots
+            if (!vTask.currentScenarioStep.buttons) {
+                vTask.currentScenarioStep.buttons = [];
+            }
+            const dbBots = await glArr.glKnex(`${glArr.glPgLibSchema}.lib_bots`)
+                .select('id', 'botusername')
+                .orderBy('botusername');
+
+            for (const bot of dbBots) {
+                vTask.currentScenarioStep.buttons.push({
+                    buttoncaption: `@${bot.botusername}`,
+                    initcommand: bot.botusername
+                });
+            }//
+        }//choose_bot
+        else if (vTask.currentScenarioStep?.stepname === 'confirm1') {
+            // Подставляем информацию о выбранном боте
+            const vBotUsername = vTask.choose_bot;
+
+            // Получаем информацию о боте
+            const dbBot = await glArr.glKnex(`${glArr.glPgLibSchema}.lib_bots`)
+                .select('id', 'botusername', 'bottelegramid', 'port')
+                .where('botusername', vBotUsername)
+                .first();
+
+            // Количество пользователей
+            const dbUsers = await glArr.glKnex(`${glArr.glPgLibSchema}.lib_botusers`)
+                .count('id as cnt')
+                .where('botusername', vBotUsername)
+                .first();
+
+            // Количество таблиц в схеме
+            const dbTables = await glArr.glKnex.raw(`
+                SELECT count(*) as cnt FROM information_schema.tables
+                WHERE table_schema = ?`, [vBotUsername]);
+
+            // Количество команд
+            const dbCommands = await glArr.glKnex(`${glArr.glPgLibSchema}.lib_cmdmessages`)
+                .count('id as cnt')
+                .where('botusername', vBotUsername)
+                .first();
+
+            // Количество сценариев
+            const dbScenarios = await glArr.glKnex(`${glArr.glPgLibSchema}.lib_savescenario`)
+                .count('id as cnt')
+                .where('botusername', vBotUsername)
+                .first();
+
+            const vBotInfo = `<b>🤖 Бот:</b> @${vBotUsername}
+<b>📋 Telegram ID:</b> ${dbBot?.bottelegramid || 'N/A'}
+<b>🔌 Порт:</b> ${dbBot?.port || 'N/A'}
+<b>👥 Пользователей:</b> ${dbUsers?.cnt || 0}
+<b>🗄️ Таблиц в схеме:</b> ${dbTables?.rows?.[0]?.cnt || 0}
+<b>💬 Команд:</b> ${dbCommands?.cnt || 0}
+<b>📝 Сценариев:</b> ${dbScenarios?.cnt || 0}`;
+
+            vTask.currentScenarioStep.question = vTask.currentScenarioStep.question.replace('🔬botinfo🔬', vBotInfo);
+        }//confirm1
+    }//deleteBot
 } //❓🆗❓ Добавление динамических кнопок и обработка вопроса шага перед отправкой пользователю
 async function lcActBeforeAssign(updMsg, vTask) {
-    if (vTask.taskType === 'createBot' && vTask.currentScenarioStep?.stepname === 'bottoken_test') {
-        if (vTask.use_shared_test === 'yes') {
+    console.log('☀️ lcActBeforeAssign:', vTask.taskType, vTask.currentScenarioStep?.stepname);
+    const vCbqValue = lib.libGetUpdValue(updMsg, vTask); // Получаем значение из callback/message
+
+    if (vTask.taskType === 'createBot' && vTask.currentScenarioStep?.stepname === 'use_shared_test') {
+        if (vCbqValue === 'yes') {
             // Получаем токен общего тестового бота из любого существующего бота
             const dbBot = await glArr.glKnex(`${glArr.glPgLibSchema}.lib_bots`)
                 .select(glArr.glKnex.raw("secrets->'telegram'->>'test' as testtoken"))
@@ -106,10 +162,27 @@ async function lcActBeforeAssign(updMsg, vTask) {
 
             if (dbBot?.testtoken) {
                 vTask.bottoken_test = dbBot.testtoken;
-                await lib.libActualiseCurrentStep(glArr, vTask);
+                // Шаг bottoken_test будет пропущен, т.к. значение уже заполнено
             }//
         }//Подстановка токена общего тестового бота
-    }//createBot bottoken_test
+    }//createBot use_shared_test
+    else if (vTask.taskType === 'deleteBot') {
+        // Если на любом шаге подтверждения нажали "Нет" — отменяем
+        if ((vTask.currentScenarioStep?.stepname === 'confirm1' ||
+             vTask.currentScenarioStep?.stepname === 'confirm2' ||
+             vTask.currentScenarioStep?.stepname === 'confirm3') && vCbqValue === 'no') {
+            await lib.libSendBigMessage(glArr, vTask.vChatId, '✅ Удаление отменено. Бот сохранён.');
+            await lib.libDeleteTask(glArr, vTask);
+            return false; //⛔ Прерываем обработку
+        }//
+        // Проверка пароля
+        if (vTask.currentScenarioStep?.stepname === 'delete_password' && vCbqValue !== 'похудаляй') {
+            await lib.libSendBigMessage(glArr, vTask.vChatId, '❌ Неверный пароль! Удаление отменено.');
+            await lib.libDeleteTask(glArr, vTask);
+            return false; //⛔ Прерываем обработку
+        }//
+    }//deleteBot
+    return true; //❗ Обязательно возвращаем true для продолжения обработки
 } //☀️☀️☀️🛃🛃🛃 Дозаполнение полей перед присвоением значения шагу
 async function lcSaveTaskToDb(vTask) {
     if (vTask.taskType === 'createBot') {
@@ -118,7 +191,6 @@ async function lcSaveTaskToDb(vTask) {
         try {
             const vTokenProd = vTask.bottoken_prod?.trim();
             const vTokenTest = vTask.bottoken_test?.trim();
-            const vCreateGithub = vTask.create_github === 'yes';
             const vStartMessage = vTask.start_message || 'Добро пожаловать!';
 
             // ============ A. ВАЛИДАЦИЯ ТОКЕНА И ПОЛУЧЕНИЕ BOT INFO ============
@@ -254,96 +326,75 @@ async function lcSaveTaskToDb(vTask) {
                 vResultMsg += '✅\n';
             }//
 
-            // ============ F. MANAGED_BOTS ============
-            vResultMsg += '📋 managed_bots... ';
-            const vExistingManaged = await glArr.glKnex('megaarchitectbot.managed_bots')
-                .where('botusername', vBotUsername)
-                .first();
+            // ============ F. GITHUB + ДЕПЛОЙ ============
+            const vRepoName = vBotUsername;
+            const vOwner = 'pkondaurov';
+            const vRepoUrl = `git@github.com:${vOwner}/${vRepoName}.git`;
+            const vProdPath = `/home/notfstrf/bots/${vBotUsername}`;
+            const vTestPath = `/home/pkondaurov/dev/${vBotUsername}`;
+            const vLocalPath = glArr.glIsProd ? vProdPath : vTestPath;
 
-            if (vExistingManaged) {
-                vResultMsg += '⏭️\n';
-            } else {
-                await glArr.glKnex('megaarchitectbot.managed_bots')
-                    .insert({
-                        botusername: vBotUsername,
-                        lib_bots_id: vLibBotsId,
-                        github_repo: vCreateGithub ? `pkondaurov/${vBotUsername}` : null,
-                        createdby: vTask.vTaskBotUsersId
-                    });
-                vResultMsg += '✅\n';
+            // Проверяем/создаём репозиторий
+            vResultMsg += '📦 GitHub... ';
+            try {
+                let vRepoExists = false;
+                try {
+                    execSync(`gh repo view ${vOwner}/${vRepoName}`, { encoding: 'utf8', stdio: 'pipe' });
+                    vRepoExists = true;
+                } catch (e) { /* не существует */ }
+
+                if (vRepoExists) {
+                    vResultMsg += '⏭️ уже есть\n';
+                } else {
+                    const vDesc = vTask.botdescription || `Telegram bot ${vBotUsername}`;
+                    execSync(`gh repo create ${vRepoName} --public --description "${vDesc}"`, { encoding: 'utf8' });
+                    vResultMsg += '✅\n';
+                }//
+            } catch (err) {
+                vResultMsg += `❌ ${err.message}\n`;
             }//
 
-            // ============ G. GITHUB + ДЕПЛОЙ ============
-            if (vCreateGithub) {
-                const vRepoName = vBotUsername;
-                const vOwner = 'pkondaurov';
-                const vRepoUrl = `git@github.com:${vOwner}/${vRepoName}.git`;
-                const vProdPath = `/home/notfstrf/bots/${vBotUsername}`;
-                const vTestPath = `/home/pkondaurov/dev/${vBotUsername}`;
-                const vLocalPath = glArr.glIsProd ? vProdPath : vTestPath;
+            // Клонируем локально
+            vResultMsg += glArr.glIsProd ? '🚀 Клон на прод... ' : '🖥️ Клон на тест... ';
+            try {
+                if (!fs.existsSync(vLocalPath)) {
+                    execSync(`git clone ${vRepoUrl} ${vLocalPath}`, { encoding: 'utf8' });
 
-                // Проверяем/создаём репозиторий
-                vResultMsg += '📦 GitHub... ';
-                try {
-                    let vRepoExists = false;
-                    try {
-                        execSync(`gh repo view ${vOwner}/${vRepoName}`, { encoding: 'utf8', stdio: 'pipe' });
-                        vRepoExists = true;
-                    } catch (e) { /* не существует */ }
+                    // Читаем шаблон из БД и заменяем переменные
+                    const dbCfg = await glArr.glKnex(`${glArr.glPgLibSchema}.lib_configs`).first();
+                    const vIndexContent = dbCfg.indexjs
+                        .replace(/🔬botusername🔬/g, vBotUsername)
+                        .replace(/🔬schema🔬/g, vSchemaName)
+                        .replace(/🔬description🔬/g, vTask.botdescription || `Telegram bot ${vBotUsername}`);
 
-                    if (vRepoExists) {
-                        vResultMsg += '⏭️ уже есть\n';
-                    } else {
-                        const vDesc = vTask.botdescription || `Telegram bot ${vBotUsername}`;
-                        execSync(`gh repo create ${vRepoName} --public --description "${vDesc}"`, { encoding: 'utf8' });
-                        vResultMsg += '✅\n';
-                    }//
-                } catch (err) {
-                    vResultMsg += `❌ ${err.message}\n`;
-                }//
+                    // Записываем Index.js
+                    const vIndexPath = `${vLocalPath}/${vBotUsername}Index.js`;
+                    fs.writeFileSync(vIndexPath, vIndexContent, 'utf8');
 
-                // Клонируем локально
-                vResultMsg += glArr.glIsProd ? '🚀 Клон на прод... ' : '🖥️ Клон на тест... ';
-                try {
-                    if (!fs.existsSync(vLocalPath)) {
-                        execSync(`git clone ${vRepoUrl} ${vLocalPath}`, { encoding: 'utf8' });
+                    // Коммитим и пушим (в пустой репо нужен -u origin main)
+                    execSync(`cd ${vLocalPath} && git checkout -b main && git add . && git commit -m "Initial commit: bot skeleton" && git push -u origin main`, { encoding: 'utf8' });
 
-                        // Читаем шаблон из БД и заменяем переменные
-                        const dbCfg = await glArr.glKnex(`${glArr.glPgLibSchema}.lib_configs`).first();
-                        const vIndexContent = dbCfg.indexjs
-                            .replace(/🔬botusername🔬/g, vBotUsername)
-                            .replace(/🔬schema🔬/g, vSchemaName)
-                            .replace(/🔬description🔬/g, vTask.botdescription || `Telegram bot ${vBotUsername}`);
-
-                        // Записываем Index.js
-                        const vIndexPath = `${vLocalPath}/${vBotUsername}Index.js`;
-                        fs.writeFileSync(vIndexPath, vIndexContent, 'utf8');
-
-                        // Коммитим и пушим (в пустой репо нужен -u origin main)
-                        execSync(`cd ${vLocalPath} && git checkout -b main && git add . && git commit -m "Initial commit: bot skeleton" && git push -u origin main`, { encoding: 'utf8' });
-
-                        vResultMsg += '✅\n';
-                    } else {
-                        vResultMsg += '⏭️\n';
-                    }//
-                } catch (err) {
-                    vResultMsg += `❌ ${err.message}\n`;
-                }//
-
-                // Клонируем на удалённый сервер
-                if (glArr.glIsProd) {
-                    // TODO: SSH на тест (пока недоступен с прода)
-                    vResultMsg += '🖥️ Клон на тест... ⏸️ (SSH не настроен)\n';
+                    vResultMsg += '✅\n';
                 } else {
-                    vResultMsg += '🚀 Клон на прод... ';
-                    try {
-                        const vResult = execSync(`ssh notfstrf@84.252.140.239 "[ -d '${vProdPath}' ] && echo EXISTS || git clone ${vRepoUrl} ${vProdPath} && echo CLONED"`, { encoding: 'utf8' });
-                        vResultMsg += vResult.includes('CLONED') ? '✅\n' : '⏭️\n';
-                    } catch (err) {
-                        vResultMsg += `❌ ${err.message}\n`;
-                    }//
+                    vResultMsg += '⏭️\n';
                 }//
-            }//GitHub + деплой
+            } catch (err) {
+                vResultMsg += `❌ ${err.message}\n`;
+            }//
+
+            // Клонируем на удалённый сервер
+            if (glArr.glIsProd) {
+                // TODO: SSH на тест (пока недоступен с прода)
+                vResultMsg += '🖥️ Клон на тест... ⏸️ (SSH не настроен)\n';
+            } else {
+                vResultMsg += '🚀 Клон на прод... ';
+                try {
+                    const vResult = execSync(`ssh notfstrf@84.252.140.239 "[ -d '${vProdPath}' ] && echo EXISTS || git clone ${vRepoUrl} ${vProdPath} && echo CLONED"`, { encoding: 'utf8' });
+                    vResultMsg += vResult.includes('CLONED') ? '✅\n' : '⏭️\n';
+                } catch (err) {
+                    vResultMsg += `❌ ${err.message}\n`;
+                }//
+            }//
 
             // ============ ИТОГ ============
             vResultMsg += '\n✅ <b>Бот создан!</b>\n';
@@ -355,6 +406,330 @@ async function lcSaveTaskToDb(vTask) {
             await lib.libProcessError(glArr, err, vTask.vInitialMsg, false, 'lcSaveTaskToDb createBot');
         }//catch
     }//createBot
+    else if (vTask.taskType === 'deleteBot') {
+        const vBotUsername = vTask.choose_bot;
+        let vResultMsg = `🗑️ <b>Удаление бота @${vBotUsername}</b>\n\n`;
+
+        try {
+            const vTimestamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 15);
+            const vBackupDir = `/home/pkondaurov/backups/deleted_bots/${vBotUsername}_${vTimestamp}`;
+            const vTestBotPath = `/home/pkondaurov/dev/${vBotUsername}`;
+            const vProdBotPath = `/home/notfstrf/bots/${vBotUsername}`;
+
+            // SSH хосты
+            const vTestHost = 'pkondaurov@92.51.45.118';
+            const vProdHost = 'notfstrf@84.252.140.239';
+            const vDbConfig = dbConnect; // используем уже загруженный конфиг
+
+            // ============ 1. СОЗДАНИЕ ПАПКИ БЭКАПА ============
+            vResultMsg += '📁 Создание папки бэкапа... ';
+            if (glArr.glIsProd) {
+                execSync(`ssh ${vTestHost} "mkdir -p ${vBackupDir}/db"`, { encoding: 'utf8' });
+            } else {
+                fs.mkdirSync(`${vBackupDir}/db`, { recursive: true });
+            }
+            vResultMsg += '✅\n';
+
+            // ============ 2. БЭКАП БАЗЫ ДАННЫХ ============
+            vResultMsg += '💾 Бэкап БД...\n';
+
+            // Вспомогательная функция для записи JSON на тест
+            const writeJsonToTest = (filePath, data) => {
+                const jsonContent = JSON.stringify(data, null, 2);
+                if (glArr.glIsProd) {
+                    // Записываем локально во временный файл, потом scp на тест
+                    const tmpFile = `/tmp/backup_${Date.now()}.json`;
+                    fs.writeFileSync(tmpFile, jsonContent);
+                    execSync(`scp ${tmpFile} ${vTestHost}:${filePath}`, { encoding: 'utf8' });
+                    fs.unlinkSync(tmpFile);
+                } else {
+                    fs.writeFileSync(filePath, jsonContent);
+                }
+            };
+
+            // 2.1 lib_bots
+            const dbBot = await glArr.glKnex(`${glArr.glPgLibSchema}.lib_bots`)
+                .where('botusername', vBotUsername)
+                .first();
+            if (dbBot) {
+                writeJsonToTest(`${vBackupDir}/db/lib_bots.json`, dbBot);
+                vResultMsg += '   lib_bots ✅\n';
+            }//
+
+            // 2.2 lib_workgroups
+            const dbWorkgroups = await glArr.glKnex(`${glArr.glPgLibSchema}.lib_workgroups`)
+                .where('botusername', vBotUsername);
+            writeJsonToTest(`${vBackupDir}/db/lib_workgroups.json`, dbWorkgroups);
+            vResultMsg += `   lib_workgroups (${dbWorkgroups.length}) ✅\n`;
+
+            // 2.3 lib_botusers
+            const dbBotusers = await glArr.glKnex(`${glArr.glPgLibSchema}.lib_botusers`)
+                .where('botusername', vBotUsername);
+            writeJsonToTest(`${vBackupDir}/db/lib_botusers.json`, dbBotusers);
+            vResultMsg += `   lib_botusers (${dbBotusers.length}) ✅\n`;
+
+            // 2.4 lib_savescenario
+            const dbScenarios = await glArr.glKnex(`${glArr.glPgLibSchema}.lib_savescenario`)
+                .where('botusername', vBotUsername);
+            writeJsonToTest(`${vBackupDir}/db/lib_savescenario.json`, dbScenarios);
+            vResultMsg += `   lib_savescenario (${dbScenarios.length}) ✅\n`;
+
+            // 2.5 lib_scenariobuttons (по id сценариев)
+            const vScenarioIds = dbScenarios.map(s => s.id);
+            let dbButtons = [];
+            if (vScenarioIds.length > 0) {
+                dbButtons = await glArr.glKnex(`${glArr.glPgLibSchema}.lib_scenariobuttons`)
+                    .whereIn('savescenarioid', vScenarioIds);
+            }//
+            writeJsonToTest(`${vBackupDir}/db/lib_scenariobuttons.json`, dbButtons);
+            vResultMsg += `   lib_scenariobuttons (${dbButtons.length}) ✅\n`;
+
+            // 2.6 lib_cmdmessages
+            const dbCmdmessages = await glArr.glKnex(`${glArr.glPgLibSchema}.lib_cmdmessages`)
+                .where('botusername', vBotUsername);
+            writeJsonToTest(`${vBackupDir}/db/lib_cmdmessages.json`, dbCmdmessages);
+            vResultMsg += `   lib_cmdmessages (${dbCmdmessages.length}) ✅\n`;
+
+            // 2.7 lib_msgbuttons, lib_msgphotos, lib_msgfiles (связаны с cmdmessages)
+            const vCmdmessagesIds = dbCmdmessages.map(c => c.id);
+
+            let dbMsgbuttons = [];
+            let dbMsgphotos = [];
+            let dbMsgfiles = [];
+            if (vCmdmessagesIds.length > 0) {
+                dbMsgbuttons = await glArr.glKnex(`${glArr.glPgLibSchema}.lib_msgbuttons`)
+                    .whereIn('cmdmessagesid', vCmdmessagesIds);
+                dbMsgphotos = await glArr.glKnex(`${glArr.glPgLibSchema}.lib_msgphotos`)
+                    .whereIn('cmdmessagesid', vCmdmessagesIds);
+                dbMsgfiles = await glArr.glKnex(`${glArr.glPgLibSchema}.lib_msgfiles`)
+                    .whereIn('cmdmessagesid', vCmdmessagesIds);
+            }
+            writeJsonToTest(`${vBackupDir}/db/lib_msgbuttons.json`, dbMsgbuttons);
+            writeJsonToTest(`${vBackupDir}/db/lib_msgphotos.json`, dbMsgphotos);
+            writeJsonToTest(`${vBackupDir}/db/lib_msgfiles.json`, dbMsgfiles);
+            vResultMsg += `   lib_msgbuttons (${dbMsgbuttons.length}) ✅\n`;
+            vResultMsg += `   lib_msgphotos (${dbMsgphotos.length}) ✅\n`;
+            vResultMsg += `   lib_msgfiles (${dbMsgfiles.length}) ✅\n`;
+
+            // 2.8 Схема бота (pg_dump) — всегда выполняем на тесте
+            try {
+                const vDbConfig = require('./dbconnect.json');
+                const vDumpCmd = `PGPASSWORD="${vDbConfig.password}" pg_dump -h ${vDbConfig.host} -U ${vDbConfig.user} -d ${vDbConfig.database} -n ${vBotUsername} --no-owner`;
+                if (glArr.glIsProd) {
+                    execSync(`ssh ${vTestHost} '${vDumpCmd} > "${vBackupDir}/db/schema_${vBotUsername}.sql"'`, { encoding: 'utf8' });
+                } else {
+                    execSync(`${vDumpCmd} > "${vBackupDir}/db/schema_${vBotUsername}.sql"`, { encoding: 'utf8' });
+                }
+                vResultMsg += `   schema_${vBotUsername} ✅\n`;
+            } catch (err) {
+                vResultMsg += `   schema_${vBotUsername} ⏭️ (пустая или не существует)\n`;
+            }//
+
+            // ============ 3. БЭКАП GITHUB ============
+            vResultMsg += '📦 Бэкап GitHub... ';
+            let vGithubRepoExists = false;
+            try {
+                if (glArr.glIsProd) {
+                    execSync(`ssh ${vTestHost} 'git clone git@github.com:pkondaurov/${vBotUsername}.git "${vBackupDir}/github"'`, { encoding: 'utf8', stdio: 'pipe' });
+                } else {
+                    execSync(`git clone git@github.com:pkondaurov/${vBotUsername}.git "${vBackupDir}/github"`, { encoding: 'utf8', stdio: 'pipe' });
+                }
+                vResultMsg += '✅\n';
+                vGithubRepoExists = true;
+            } catch (err) {
+                vResultMsg += '⏭️ (репо не существует)\n';
+            }//
+
+            // ============ 4. БЭКАП ПАПКИ НА ТЕСТЕ ============
+            vResultMsg += '🖥️ Бэкап тест-папки... ';
+            try {
+                if (glArr.glIsProd) {
+                    execSync(`ssh ${vTestHost} '[ -d "${vTestBotPath}" ] && cp -r "${vTestBotPath}" "${vBackupDir}/test" || echo NOTEXIST'`, { encoding: 'utf8' });
+                } else {
+                    if (fs.existsSync(vTestBotPath)) {
+                        execSync(`cp -r "${vTestBotPath}" "${vBackupDir}/test"`, { encoding: 'utf8' });
+                    }
+                }
+                vResultMsg += '✅\n';
+            } catch (err) {
+                vResultMsg += '⏭️ (не существует)\n';
+            }//
+
+            // ============ 5. БЭКАП ПАПКИ НА ПРОДЕ ============
+            vResultMsg += '🚀 Бэкап прод-папки... ';
+            try {
+                if (glArr.glIsProd) {
+                    // С прода: сначала tar локально, потом scp на тест
+                    execSync(`tar -czf /tmp/${vBotUsername}_prod.tar.gz -C /home/notfstrf/bots ${vBotUsername} 2>/dev/null && scp /tmp/${vBotUsername}_prod.tar.gz ${vTestHost}:${vBackupDir}/prod.tar.gz && rm /tmp/${vBotUsername}_prod.tar.gz`, { encoding: 'utf8', timeout: 60000 });
+                } else {
+                    // С теста: ssh на прод и tar через pipe
+                    execSync(`ssh ${vProdHost} "tar -czf - -C /home/notfstrf/bots ${vBotUsername}" > "${vBackupDir}/prod.tar.gz"`, { encoding: 'utf8', timeout: 60000 });
+                }
+                vResultMsg += '✅\n';
+            } catch (err) {
+                vResultMsg += `⏭️ (${err.message})\n`;
+            }//
+
+            vResultMsg += '\n✅ <b>Бэкап завершён!</b>\n';
+            vResultMsg += `📂 ${vBackupDir}\n\n`;
+            vResultMsg += '🗑️ <b>Начинаю удаление...</b>\n\n';
+            await lib.libSendBigMessage(glArr, vTask.vChatId, vResultMsg);
+            vResultMsg = '';
+
+            // ============ 6. УДАЛЕНИЕ ИЗ БД ============
+            // 6.1 lib_scenariobuttons
+            try {
+                if (vScenarioIds.length > 0) {
+                    await glArr.glKnex(`${glArr.glPgLibSchema}.lib_scenariobuttons`)
+                        .whereIn('savescenarioid', vScenarioIds)
+                        .del();
+                }//
+                vResultMsg += '🗑️ lib_scenariobuttons ✅\n';
+            } catch (err) {
+                vResultMsg += `🗑️ lib_scenariobuttons ❌ ${err.message}\n`;
+            }
+
+            // 6.2 lib_savescenario
+            try {
+                await glArr.glKnex(`${glArr.glPgLibSchema}.lib_savescenario`)
+                    .where('botusername', vBotUsername)
+                    .del();
+                vResultMsg += '🗑️ lib_savescenario ✅\n';
+            } catch (err) {
+                vResultMsg += `🗑️ lib_savescenario ❌ ${err.message}\n`;
+            }
+
+            // 6.3 lib_cmdmessages
+            try {
+                await glArr.glKnex(`${glArr.glPgLibSchema}.lib_cmdmessages`)
+                    .where('botusername', vBotUsername)
+                    .del();
+                vResultMsg += '🗑️ lib_cmdmessages ✅\n';
+            } catch (err) {
+                vResultMsg += `🗑️ lib_cmdmessages ❌ ${err.message}\n`;
+            }
+
+            // 6.4 lib_workgroups
+            try {
+                await glArr.glKnex(`${glArr.glPgLibSchema}.lib_workgroups`)
+                    .where('botusername', vBotUsername)
+                    .del();
+                vResultMsg += '🗑️ lib_workgroups ✅\n';
+            } catch (err) {
+                vResultMsg += `🗑️ lib_workgroups ❌ ${err.message}\n`;
+            }
+
+            // 6.5 lib_botusers
+            try {
+                await glArr.glKnex(`${glArr.glPgLibSchema}.lib_botusers`)
+                    .where('botusername', vBotUsername)
+                    .del();
+                vResultMsg += '🗑️ lib_botusers ✅\n';
+            } catch (err) {
+                vResultMsg += `🗑️ lib_botusers ❌ ${err.message}\n`;
+            }
+
+            // 6.6 lib_bots
+            try {
+                await glArr.glKnex(`${glArr.glPgLibSchema}.lib_bots`)
+                    .where('botusername', vBotUsername)
+                    .del();
+                vResultMsg += '🗑️ lib_bots ✅\n';
+            } catch (err) {
+                vResultMsg += `🗑️ lib_bots ❌ ${err.message}\n`;
+            }
+
+            // 6.7 DROP SCHEMA
+            try {
+                await glArr.glKnex.raw(`DROP SCHEMA IF EXISTS "${vBotUsername}" CASCADE`);
+                vResultMsg += `🗑️ schema "${vBotUsername}" ✅\n`;
+            } catch (err) {
+                vResultMsg += `🗑️ schema "${vBotUsername}" ❌ ${err.message}\n`;
+            }//
+
+            // ============ 7. УДАЛЕНИЕ ПАПКИ НА ТЕСТЕ ============
+            vResultMsg += '🗑️ Папка на тесте... ';
+            try {
+                if (glArr.glIsProd) {
+                    execSync(`ssh ${vTestHost} 'rm -rf "${vTestBotPath}"'`, { encoding: 'utf8' });
+                } else {
+                    if (fs.existsSync(vTestBotPath)) {
+                        execSync(`rm -rf "${vTestBotPath}"`, { encoding: 'utf8' });
+                    }
+                }
+                vResultMsg += '✅\n';
+            } catch (err) {
+                vResultMsg += `❌ ${err.message}\n`;
+            }//
+
+            // ============ 8. УДАЛЕНИЕ ПАПКИ НА ПРОДЕ ============
+            vResultMsg += '🗑️ Папка на проде... ';
+            try {
+                if (glArr.glIsProd) {
+                    execSync(`rm -rf "${vProdBotPath}"`, { encoding: 'utf8' });
+                } else {
+                    execSync(`ssh ${vProdHost} "rm -rf ${vProdBotPath}"`, { encoding: 'utf8', timeout: 30000 });
+                }
+                vResultMsg += '✅\n';
+            } catch (err) {
+                vResultMsg += `❌ ${err.message}\n`;
+            }//
+
+            // ============ 9. УДАЛЕНИЕ GITHUB РЕПОЗИТОРИЯ ============
+            vResultMsg += '🗑️ GitHub репозиторий... ';
+            if (vGithubRepoExists) {
+                try {
+                    // gh установлен на тесте, выполняем там
+                    if (glArr.glIsProd) {
+                        execSync(`ssh ${vTestHost} 'gh repo delete pkondaurov/${vBotUsername} --yes'`, { encoding: 'utf8' });
+                    } else {
+                        execSync(`gh repo delete pkondaurov/${vBotUsername} --yes`, { encoding: 'utf8' });
+                    }
+                    vResultMsg += '✅\n';
+                } catch (err) {
+                    vResultMsg += `❌ ${err.message}\n`;
+                }//
+            } else {
+                vResultMsg += '⏭️ (не существовал)\n';
+            }//
+
+            // ============ 10. PM2 — ОСТАНОВКА И УДАЛЕНИЕ ============
+            vResultMsg += '🗑️ PM2... ';
+            try {
+                // На тесте
+                try {
+                    if (glArr.glIsProd) {
+                        execSync(`ssh ${vTestHost} 'pm2 delete ${vBotUsername}-test 2>/dev/null || true && pm2 save'`, { encoding: 'utf8' });
+                    } else {
+                        execSync(`pm2 delete ${vBotUsername}-test 2>/dev/null || true && pm2 save`, { encoding: 'utf8' });
+                    }
+                } catch (e) {
+                    vResultMsg += `(тест: ${e.message}) `;
+                }
+                // На проде
+                try {
+                    if (glArr.glIsProd) {
+                        execSync(`source ~/.nvm/nvm.sh && pm2 delete ${vBotUsername}-app 2>/dev/null || true && pm2 save`, { encoding: 'utf8' });
+                    } else {
+                        execSync(`ssh ${vProdHost} "source ~/.nvm/nvm.sh && pm2 delete ${vBotUsername}-app 2>/dev/null || true && pm2 save"`, { encoding: 'utf8', timeout: 30000 });
+                    }
+                } catch (e) {
+                    vResultMsg += `(прод: ${e.message}) `;
+                }
+                vResultMsg += '✅\n';
+            } catch (err) {
+                vResultMsg += `❌ ${err.message}\n`;
+            }//
+
+            vResultMsg += '\n✅✅✅ <b>Бот @' + vBotUsername + ' полностью удалён!</b>\n';
+            vResultMsg += `\n📂 Бэкап: ${vBackupDir}`;
+
+            await lib.libSendBigMessage(glArr, vTask.vChatId, vResultMsg);
+
+        } catch (err) {
+            await lib.libProcessError(glArr, err, vTask.vInitialMsg, false, 'lcSaveTaskToDb deleteBot');
+        }//catch
+    }//deleteBot
 }//🆘🆘🆘 Сохранение специфичных тасков для этого бота
 async function lcGetFullInfoExtra(vBotUsersId) {
     return null;
